@@ -17,12 +17,12 @@ limitations under the License.
 package main
 
 import (
+	"encoding/json"
 	"flag"
 	"fmt"
 	"time"
 
 	"github.com/golang/glog"
-
 	"k8s.io/api/core/v1"
 	meta_v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/fields"
@@ -35,16 +35,18 @@ import (
 )
 
 type Controller struct {
-	indexer  cache.Indexer
-	queue    workqueue.RateLimitingInterface
-	informer cache.Controller
+	indexer        cache.Indexer
+	queue          workqueue.RateLimitingInterface
+	informer       cache.Controller
+	deletedIndexer cache.Indexer
 }
 
-func NewController(queue workqueue.RateLimitingInterface, indexer cache.Indexer, informer cache.Controller) *Controller {
+func NewController(queue workqueue.RateLimitingInterface, indexer cache.Indexer, informer cache.Controller, deletedIndexer cache.Indexer) *Controller {
 	return &Controller{
-		informer: informer,
-		indexer:  indexer,
-		queue:    queue,
+		informer:       informer,
+		indexer:        indexer,
+		queue:          queue,
+		deletedIndexer: deletedIndexer,
 	}
 }
 
@@ -78,7 +80,15 @@ func (c *Controller) syncToStdout(key string) error {
 
 	if !exists {
 		// Below we will warm up our cache with a Pod, so that we will see a delete for one pod
-		fmt.Printf("Pod %s does not exist anymore\n", key)
+		fmt.Println("------------------------------------------------------------------------------------------")
+		fmt.Printf("Pod `%s` does not exist anymore\n", key)
+
+		if obj, exists, err = c.deletedIndexer.GetByKey(key); err == nil && exists {
+			b, _ := json.MarshalIndent(obj, "", "  ")
+			fmt.Println(string(b))
+
+			c.deletedIndexer.Delete(key)
+		}
 	} else {
 		// Note that you also have to check the uid if you have a local controlled resource, which
 		// is dependent on the actual instance, to detect that a Pod was recreated with the same name
@@ -167,6 +177,9 @@ func main() {
 	// create the workqueue
 	queue := workqueue.NewRateLimitingQueue(workqueue.DefaultControllerRateLimiter())
 
+	// stored deleted objects
+	deletedIndexer := cache.NewIndexer(cache.DeletionHandlingMetaNamespaceKeyFunc, cache.Indexers{})
+
 	// Bind the workqueue to a cache with the help of an informer. This way we make sure that
 	// whenever the cache is updated, the pod key is added to the workqueue.
 	// Note that when we finally process the item from the workqueue, we might see a newer version
@@ -176,6 +189,7 @@ func main() {
 			key, err := cache.MetaNamespaceKeyFunc(obj)
 			if err == nil {
 				queue.Add(key)
+				deletedIndexer.Delete(obj)
 			}
 		},
 		UpdateFunc: func(old interface{}, new interface{}) {
@@ -189,12 +203,13 @@ func main() {
 			// key function.
 			key, err := cache.DeletionHandlingMetaNamespaceKeyFunc(obj)
 			if err == nil {
+				deletedIndexer.Add(obj)
 				queue.Add(key)
 			}
 		},
 	}, cache.Indexers{})
 
-	controller := NewController(queue, indexer, informer)
+	controller := NewController(queue, indexer, informer, deletedIndexer)
 
 	// We can now warm up the cache for initial synchronization.
 	// Let's suppose that we knew about a pod "mypod" on our last run, therefore add it to the cache.
