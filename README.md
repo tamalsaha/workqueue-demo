@@ -15,3 +15,6 @@ The example is based on https://git.k8s.io/community/contributors/devel/controll
 # if outside of the cluster
 go run *.go -kubeconfig=/my/config -logtostderr=true
 ```
+
+## Acknowledgement
+Forked from https://github.com/kubernetes/client-go/tree/master/examples/workqueue
