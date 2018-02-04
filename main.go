@@ -27,11 +27,14 @@ import (
 	meta_v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/fields"
 	"k8s.io/apimachinery/pkg/util/runtime"
+	rt "k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/tools/clientcmd"
 	"k8s.io/client-go/util/workqueue"
+	"k8s.io/apimachinery/pkg/api/meta"
+	"github.com/tamalsaha/go-oneliners"
 )
 
 type Controller struct {
@@ -186,6 +189,18 @@ func main() {
 	// of the Pod than the version which was responsible for triggering the update.
 	indexer, informer := cache.NewIndexerInformer(podListWatcher, &v1.Pod{}, 0, cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
+			metaObj, err := meta.Accessor(obj)
+			oneliners.FILE(metaObj, err)
+
+			rtObj, rtOk := obj.(rt.Object)
+			if !rtOk {
+				oneliners.FILE("Not rtObject")
+			}
+
+			accessor := meta.NewAccessor()
+			oneliners.FILE(accessor.APIVersion(rtObj))
+			oneliners.FILE(accessor.Kind(rtObj))
+
 			key, err := cache.MetaNamespaceKeyFunc(obj)
 			if err == nil {
 				queue.Add(key)
